@@ -14,6 +14,7 @@
 
 from typing import List, Optional, Tuple, Union
 
+from line_profiler import profile
 import numpy as np
 import numpy.typing as npt
 from numba import njit
@@ -51,6 +52,7 @@ class ParticleTree:
         p.expansion_nodes = self.expansion_nodes.copy()
         return p
 
+    @profile
     def sample_tree(
         self,
         ssv,
@@ -219,6 +221,7 @@ class PGBART(ArrayStepShared):
         self.iter = 0
         super().__init__(vars, shared)
 
+    # @profile
     def astep(self, _):
         variable_inclusion = np.zeros(self.num_variates, dtype="int")
 
@@ -369,6 +372,7 @@ class PGBART(ArrayStepShared):
         particles.extend(ParticleTree(self.a_tree) for _ in self.indices)
         return particles
 
+    @profile
     def update_weight(self, particle: ParticleTree, odim: int) -> None:
         """
         Update the weight of a particle.
