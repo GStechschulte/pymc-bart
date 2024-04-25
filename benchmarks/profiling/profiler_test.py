@@ -1,14 +1,10 @@
 import numpy as np
 import pymc as pm
 
-# from memory_profiler import profile
-
 import pymc_bart as pmb
 
-@profile
 def main():
 
-    # with profile.timestamp("create_data"):
     np.random.seed(0)
     n = 100
     X = np.random.uniform(0, 10, n)

@@ -1,25 +1,28 @@
 To run the profiling, you will need to install the additional dependencies:
 
 ```bash
-pip install snakeviz line_profiler
+pip install snakeviz line_profiler memray
 ```
 
-`snakeviz` is used to visualize the profiling from the `cProfile` standard library. `cPorfile` is leveraged to gain a high-level view to guide which functions to profile with `line_profiler`.
+## Line profiling
+
+`snakeviz` is used to visualize the profiling from the `cProfile` standard library. `cProfile` is leveraged to gain a high-level view to guide which functions to profile with `line_profiler`.
 
 `line_profiler` provides a line-by-line analysis of the function being profiled. In our case, we are interested in decorating the `.astep` method of the `PGBART` sampler with `@profile` to obtain a line-by-line profile analysis. The `.astep` method represents the main entry point of the particle sampler.
 
 Run
 
 ```bash
-kernprof -lv profiling/line_profiler.py
+kernprof -lv profiler_test.py
 ```
 
-to print the line-by-line profile analysis to stdout. `line_profiler.py` contains a simple BART model with default parameters.
-
+to print the line-by-line profile analysis to stdout. `profiler_test.py` contains a simple BART model with default parameters.
 
 ## Profiling notes
 
-When running `kernprof -lv profiling/line_profiler.py` with `astep` decorated with `@profile`, the following output is obtained:
+### Line profiling
+
+When running `kernprof -lv profiler_test.py` with `astep` decorated with `@profile`, the following output is obtained:
 
 ```bash
 Function: astep at line 224
@@ -115,7 +118,7 @@ The majority of the time in this function is spent in
 - `p.sample_tree` = 30.2%
 - `self.update_weight` = 46.6%
 - `self.resample` = 9.0%
--  `self.running_sd[odim].update(new)` = 8.5%
+- `self.running_sd[odim].update(new)` = 8.5%
 
 
 We can then continue to `@profile` the methods and functions in the call stack. Decorating the `sample_tree` method, we obtain the following output:
@@ -170,3 +173,36 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
 
 The majority of the time in this function is spent in:
 - `grow_tree` = 90.9%
+
+and so on and so forth...
+
+## Memory profiling
+
+`memray` is used to profile the memory usage of the `PGBART` sampler. The memory profile is obtained by running
+
+```bash
+python -m memray run profiler_test.py
+```
+
+There are multiple ways of analyzing the memray profile data. To visualize the memory profile data in a flame or icicle graph, run
+
+```bash
+python -m memray flame profiler_test.py
+```
+
+and then open the generated `<memray-flamegraph>.html` file in a browser.
+
+Another meaningful way to analyze the memory profile data is via a tree reporter. A tree reporter provides a simplified representation of the call hierarchy of the tracked process at the time when its memory usage was at its peak. 
+
+```bash
+python -m memray tree <profiler_test>.py.<time>.bin
+```
+
+When analyzing the memray profile data, it is often useful to hide irrelevant frames and import system frames. Below, some brief notes are given on the memory allocation when using the memray tree reporter.
+
+ - `step = pmb.PGBART([mu])`: About 17.5MB of memory utilized
+    - `jitter_duplicated(...)`: Accounts for 13.442/17.5MB of memory utilized
+ - `step.astep(iter)`: About 7.326MB of memory utilized
+    - `self.running_sd[odim].update(new)`: Accounts for 6.102/7.326MB of memory utilized
+
+The initialization of PGBART in this example accounts for the majority of the PGBART memory usage.

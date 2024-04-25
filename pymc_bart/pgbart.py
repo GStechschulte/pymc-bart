@@ -17,8 +17,8 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import numpy.typing as npt
 
-# from line_profiler import profile as profile
 # from memory_profiler import profile
+import memray
 from numba import njit
 from pymc.model import Model, modelcontext
 from pymc.pytensorf import inputvars, join_nonshared_inputs, make_shared_replacements
@@ -120,7 +120,6 @@ class PGBART(ArrayStepShared):
     generates_stats = True
     stats_dtypes = [{"variable_inclusion": object, "tune": bool}]
 
-    # @profile
     def __init__(  # noqa: PLR0915
         self,
         vars=None,  # pylint: disable=redefined-builtin
@@ -224,7 +223,6 @@ class PGBART(ArrayStepShared):
         self.iter = 0
         super().__init__(vars, shared)
 
-    @profile
     def astep(self, _):
         variable_inclusion = np.zeros(self.num_variates, dtype="int")
 
@@ -471,7 +469,6 @@ def compute_prior_probability(alpha: int, beta: int) -> List[float]:
     return prior_leaf_prob
 
 
-# @mem_profile
 def grow_tree(
     tree,
     index_leaf_node,
