@@ -14,9 +14,11 @@
 
 from typing import List, Optional, Tuple, Union
 
-from line_profiler import profile
 import numpy as np
 import numpy.typing as npt
+
+# from line_profiler import profile as profile
+# from memory_profiler import profile
 from numba import njit
 from pymc.model import Model, modelcontext
 from pymc.pytensorf import inputvars, join_nonshared_inputs, make_shared_replacements
@@ -52,7 +54,7 @@ class ParticleTree:
         p.expansion_nodes = self.expansion_nodes.copy()
         return p
 
-    @profile
+    # @line_profile
     def sample_tree(
         self,
         ssv,
@@ -118,6 +120,7 @@ class PGBART(ArrayStepShared):
     generates_stats = True
     stats_dtypes = [{"variable_inclusion": object, "tune": bool}]
 
+    # @profile
     def __init__(  # noqa: PLR0915
         self,
         vars=None,  # pylint: disable=redefined-builtin
@@ -221,7 +224,7 @@ class PGBART(ArrayStepShared):
         self.iter = 0
         super().__init__(vars, shared)
 
-    # @profile
+    @profile
     def astep(self, _):
         variable_inclusion = np.zeros(self.num_variates, dtype="int")
 
@@ -229,6 +232,7 @@ class PGBART(ArrayStepShared):
         tree_ids = range(self.lower, upper)
         self.lower = upper if upper < self.m else 0
 
+        # with profile.timestamp("main_loop"):
         for odim in range(self.trees_shape):
             for tree_id in tree_ids:
                 self.iter += 1
@@ -257,6 +261,7 @@ class PGBART(ArrayStepShared):
                             self.normal,
                             self.leaves_shape,
                         ):
+                            # with mem_profile.timestamp("update_weight"):
                             self.update_weight(p, odim)
                         if p.expansion_nodes:
                             stop_growing = False
@@ -372,7 +377,7 @@ class PGBART(ArrayStepShared):
         particles.extend(ParticleTree(self.a_tree) for _ in self.indices)
         return particles
 
-    @profile
+    # @line_profile
     def update_weight(self, particle: ParticleTree, odim: int) -> None:
         """
         Update the weight of a particle.
@@ -466,6 +471,7 @@ def compute_prior_probability(alpha: int, beta: int) -> List[float]:
     return prior_leaf_prob
 
 
+# @mem_profile
 def grow_tree(
     tree,
     index_leaf_node,
