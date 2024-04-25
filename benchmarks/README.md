@@ -205,4 +205,4 @@ When analyzing the memray profile data, it is often useful to hide irrelevant fr
  - `step.astep(iter)`: About 7.326MB of memory utilized
     - `self.running_sd[odim].update(new)`: Accounts for 6.102/7.326MB of memory utilized
 
-The initialization of PGBART in this example accounts for the majority of the PGBART memory usage.
+The initialization of PGBART in this example accounts for the majority of the PGBART memory usage. 
