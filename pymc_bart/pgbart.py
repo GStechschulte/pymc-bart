@@ -17,8 +17,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import numpy.typing as npt
 
-# from line_profiler import profile as profile
-# from memory_profiler import profile
+from line_profiler import profile
 from numba import njit
 from pymc.model import Model, modelcontext
 from pymc.pytensorf import inputvars, join_nonshared_inputs, make_shared_replacements
@@ -54,7 +53,7 @@ class ParticleTree:
         p.expansion_nodes = self.expansion_nodes.copy()
         return p
 
-    # @line_profile
+    @profile
     def sample_tree(
         self,
         ssv,
@@ -232,7 +231,6 @@ class PGBART(ArrayStepShared):
         tree_ids = range(self.lower, upper)
         self.lower = upper if upper < self.m else 0
 
-        # with profile.timestamp("main_loop"):
         for odim in range(self.trees_shape):
             for tree_id in tree_ids:
                 self.iter += 1
@@ -261,7 +259,6 @@ class PGBART(ArrayStepShared):
                             self.normal,
                             self.leaves_shape,
                         ):
-                            # with mem_profile.timestamp("update_weight"):
                             self.update_weight(p, odim)
                         if p.expansion_nodes:
                             stop_growing = False
@@ -320,6 +317,7 @@ class PGBART(ArrayStepShared):
         wei = np.exp(log_w_) + 1e-12
         return wei / wei.sum()
 
+    @profile
     def resample(
         self, particles: List[ParticleTree], normalized_weights: npt.NDArray[np.float_]
     ) -> List[ParticleTree]:
@@ -355,6 +353,7 @@ class PGBART(ArrayStepShared):
 
         return new_particle, new_particle.tree
 
+    @profile
     def systematic(self, normalized_weights: npt.NDArray[np.float_]) -> npt.NDArray[np.int_]:
         """
         Systematic resampling.
@@ -377,7 +376,7 @@ class PGBART(ArrayStepShared):
         particles.extend(ParticleTree(self.a_tree) for _ in self.indices)
         return particles
 
-    # @line_profile
+    @profile
     def update_weight(self, particle: ParticleTree, odim: int) -> None:
         """
         Update the weight of a particle.
@@ -471,7 +470,7 @@ def compute_prior_probability(alpha: int, beta: int) -> List[float]:
     return prior_leaf_prob
 
 
-# @mem_profile
+@profile
 def grow_tree(
     tree,
     index_leaf_node,
@@ -543,7 +542,7 @@ def filter_missing_values(available_splitting_values, idx_data_points, missing_d
         available_splitting_values = available_splitting_values[mask]
     return idx_data_points, available_splitting_values
 
-
+@profile
 def draw_leaf_value(
     y_mu_pred: npt.NDArray[np.float_],
     x_mu: npt.NDArray[np.float_],
@@ -673,7 +672,6 @@ class UniformSampler:
                 self.lower_bound, self.upper_bound, size=(self.shape, self.size)
             )
 
-
 @njit
 def inverse_cdf(
     single_uniform: npt.NDArray[np.float_], normalized_weights: npt.NDArray[np.float_]
@@ -730,6 +728,7 @@ def are_whole_number(array: npt.NDArray[np.float_]) -> np.bool_:
     return np.all(np.mod(array[~np.isnan(array)], 1) == 0)
 
 
+@profile
 def logp(point, out_vars, vars, shared):  # pylint: disable=redefined-builtin
     """Compile PyTensor function of the model and the input and output variables.
 

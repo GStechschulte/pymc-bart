@@ -115,7 +115,7 @@ The majority of the time in this function is spent in
 - `p.sample_tree` = 30.2%
 - `self.update_weight` = 46.6%
 - `self.resample` = 9.0%
--  `self.running_sd[odim].update(new)` = 8.5%
+- `self.running_sd[odim].update(new)` = 8.5%
 
 
 We can then continue to `@profile` the methods and functions in the call stack. Decorating the `sample_tree` method, we obtain the following output:
