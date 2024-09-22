@@ -17,8 +17,6 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import numpy.typing as npt
 
-# from line_profiler import profile as profile
-# from memory_profiler import profile
 from numba import njit
 from pymc.model import Model, modelcontext
 from pymc.pytensorf import inputvars, join_nonshared_inputs, make_shared_replacements
@@ -54,7 +52,6 @@ class ParticleTree:
         p.expansion_nodes = self.expansion_nodes.copy()
         return p
 
-    # @line_profile
     def sample_tree(
         self,
         ssv,
@@ -69,11 +66,14 @@ class ParticleTree:
         normal,
         shape,
     ) -> bool:
+        print("\nSampling tree...")
+        print("-" * 25)
         tree_grew = False
         if self.expansion_nodes:
             index_leaf_node = self.expansion_nodes.pop(0)
             # Probability that this node will remain a leaf node
             prob_leaf = prior_prob_leaf_node[get_depth(index_leaf_node)]
+            print(f"prob_leaf: {prob_leaf}")
 
             if prob_leaf < np.random.random():
                 idx_new_nodes = grow_tree(
@@ -90,6 +90,7 @@ class ParticleTree:
                     normal,
                     shape,
                 )
+                print(f"idx new nodes: {idx_new_nodes}")
                 if idx_new_nodes is not None:
                     self.expansion_nodes.extend(idx_new_nodes)
                     tree_grew = True
@@ -120,7 +121,6 @@ class PGBART(ArrayStepShared):
     generates_stats = True
     stats_dtypes = [{"variable_inclusion": object, "tune": bool}]
 
-    # @profile
     def __init__(  # noqa: PLR0915
         self,
         vars=None,  # pylint: disable=redefined-builtin
@@ -128,6 +128,9 @@ class PGBART(ArrayStepShared):
         batch: Tuple[float, float] = (0.1, 0.1),
         model: Optional[Model] = None,
     ):
+        
+        print(f"\n--- PGBART INIT ---")
+
         model = modelcontext(model)
         initial_values = model.initial_point()
         if vars is None:
@@ -138,16 +141,24 @@ class PGBART(ArrayStepShared):
         value_bart = vars[0]
         self.bart = model.values_to_rvs[value_bart].owner.op
 
+        print(f"value_bart: {value_bart}")
+        print(f"self.bart: {self.bart}")
+
         if isinstance(self.bart.X, Variable):
             self.X = self.bart.X.eval()
         else:
             self.X = self.bart.X
 
+        print(f"type(X): {type(self.X)}")
+
         self.missing_data = np.any(np.isnan(self.X))
         self.m = self.bart.m
+        print(f"self.m: {self.m}")
         self.response = self.bart.response
+        print(f"self.response: {self.response}")
 
         shape = initial_values[value_bart.name].shape
+        print(f"shape: {shape}")
 
         self.shape = 1 if len(shape) == 1 else shape[0]
 
@@ -156,11 +167,14 @@ class PGBART(ArrayStepShared):
         # One of the two is always one, the other equal to self.shape
         self.trees_shape = self.shape if self.bart.separate_trees else 1
         self.leaves_shape = self.shape if not self.bart.separate_trees else 1
+        print(f"self.trees_shape: {self.trees_shape}, self.leaves_shape: {self.leaves_shape}")
 
         if self.bart.split_prior.size == 0:
             self.alpha_vec = np.ones(self.X.shape[1])
         else:
             self.alpha_vec = self.bart.split_prior
+        
+        print(f"self.alpha_vec: {self.alpha_vec}")
 
         if self.bart.split_rules:
             self.split_rules = self.bart.split_rules
@@ -175,6 +189,8 @@ class PGBART(ArrayStepShared):
         self.num_observations = self.X.shape[0]
         self.num_variates = self.X.shape[1]
         self.available_predictors = list(range(self.num_variates))
+
+        print(f"init_mean: {init_mean}, num_observations: {self.num_observations}, num_variates: {self.num_variates}, y_shape: {self.bart.Y.shape[0]}")
 
         # if data is binary
         self.leaf_sd = np.ones((self.trees_shape, self.leaves_shape))
@@ -193,6 +209,10 @@ class PGBART(ArrayStepShared):
             (self.trees_shape, self.leaves_shape, self.bart.Y.shape[0]), init_mean
         ).astype(config.floatX)
         self.sum_trees_noi = self.sum_trees - init_mean
+
+        print(f"self.sum_trees.shape{self.sum_trees.shape}")
+        print(f"self.sum_trees_noi: {self.sum_trees_noi.shape}")
+
         self.a_tree = Tree.new_tree(
             leaf_node_value=init_mean / self.m,
             idx_data_points=np.arange(self.num_observations, dtype="int32"),
@@ -200,6 +220,12 @@ class PGBART(ArrayStepShared):
             shape=self.leaves_shape,
             split_rules=self.split_rules,
         )
+
+        print(f"init leaf node value: {init_mean / self.m}")
+        print(f"idx_data_points: {np.arange(self.num_observations, dtype='int32')}")
+        print(f"num_observations: {self.num_observations}")
+        print(f"shape: {self.leaves_shape}")
+        print(f"split_rules: {self.split_rules}")
 
         self.normal = NormalSampler(1, self.leaves_shape)
         self.uniform = UniformSampler(0, 1)
@@ -216,33 +242,62 @@ class PGBART(ArrayStepShared):
         self.indices = list(range(1, num_particles))
         shared = make_shared_replacements(initial_values, vars, model)
         self.likelihood_logp = logp(initial_values, [model.datalogp], vars, shared)
+        # One particle tree for each tree m of M
         self.all_particles = [
             [ParticleTree(self.a_tree) for _ in range(self.m)] for _ in range(self.trees_shape)
         ]
         self.all_trees = np.array([[p.tree for p in pl] for pl in self.all_particles])
         self.lower = 0
         self.iter = 0
+
+        print(f"num_particles: {self.num_particles}")
+        print(f"particles: {self.all_particles}")
+        print(f"self.likelihood_logp: {self.likelihood_logp}")
+        print(f"len(self.all_particles): {len(self.all_particles[0])}")
+        print(f"self.all_trees: {self.all_trees.shape}")
+        print(f"all trees: {self.all_trees}")
+
         super().__init__(vars, shared)
 
-    @profile
     def astep(self, _):
+        """
+        At each step, a subset m_b of the m trees are are updated.
+        By default, m_b is 10% of m.
+
+        E.g:    step 1: tree_ids range(0, 5)
+                step 2: tree_ids range(5, 10)
+                step 3: tree_ids range(10, 15)
+                ...
+        """
+        print("\n --- PGBART ASTEP ---")
+
         variable_inclusion = np.zeros(self.num_variates, dtype="int")
 
         upper = min(self.lower + self.batch[~self.tune], self.m)
-        tree_ids = range(self.lower, upper)
+        tree_ids = range(self.lower, upper) # Update n-trees at a time
         self.lower = upper if upper < self.m else 0
 
-        # with profile.timestamp("main_loop"):
+        print(f"tune: {self.tune}, self.batch[~self.tune]: {self.batch[~self.tune]}, lower: {self.lower}, upper: {upper}, batch: {self.batch}, tree_ids: {tree_ids}, tree_shape: {self.trees_shape} \n")
+
+        # odim = 0 when trees_shape = 1
         for odim in range(self.trees_shape):
             for tree_id in tree_ids:
                 self.iter += 1
                 # Compute the sum of trees without the old tree that we are attempting to replace
+                # On first iteration (before growing) the sum of trees w/o tree_id should all be the same
                 self.sum_trees_noi[odim] = (
                     self.sum_trees[odim] - self.all_particles[odim][tree_id].tree._predict()
                 )
-                # Generate an initial set of particles
-                # at the end we return one of these particles as the new tree
+                print(f"self.sum_trees w/o old tree: {self.sum_trees_noi[odim]}, \n")
+
+                # Generate an initial set of particles for _this_ tree.
+                # At the end we return one of these particles as the new tree
                 particles = self.init_particles(tree_id, odim)
+
+                print(f"iter: {self.iter}, odim: {odim}, tree_id: {tree_id}, particles: {len(particles)}")
+
+                # for p in particles:
+                #     print(p.log_weight)
 
                 while True:
                     # Sample each particle (try to grow each tree), except for the first one
@@ -261,24 +316,33 @@ class PGBART(ArrayStepShared):
                             self.normal,
                             self.leaves_shape,
                         ):
-                            # with mem_profile.timestamp("update_weight"):
+                            print("\nTree grew!")
+                            print(f"particle expansion nodes: {p.expansion_nodes}")
                             self.update_weight(p, odim)
+                        # If particle tree does not have expansion nodes, then stop growing
                         if p.expansion_nodes:
                             stop_growing = False
+                        print("Stop growing: ", stop_growing)
+                    # If this particle tree stops growing, break loop and
+                    # grow the next particle tree.
                     if stop_growing:
                         break
 
                     # Normalize weights
                     normalized_weights = self.normalize(particles[1:])
 
-                    # Resample
+                    # Resample to retain high-probability particles
                     particles = self.resample(particles, normalized_weights)
+                    print(f"resampled particles: {particles}")
 
                 normalized_weights = self.normalize(particles)
-                # Get the new particle and associated tree
+                # Get the new particle and associated tree to replace G_i
                 self.all_particles[odim][tree_id], new_tree = self.get_particle_tree(
                     particles, normalized_weights
                 )
+                
+                print(f"New tree: {new_tree}")
+
                 # Update the sum of trees
                 new = new_tree._predict()
                 self.sum_trees[odim] = self.sum_trees_noi[odim] + new
@@ -307,8 +371,8 @@ class PGBART(ArrayStepShared):
         if not self.tune:
             self.bart.all_trees.append(self.all_trees)
 
-        stats = {"variable_inclusion": variable_inclusion, "tune": self.tune}
-        return self.sum_trees, [stats]
+        # stats = {"variable_inclusion": variable_inclusion, "tune": self.tune}
+        # return self.sum_trees, [stats]
 
     def normalize(self, particles: List[ParticleTree]) -> float:
         """
@@ -323,14 +387,17 @@ class PGBART(ArrayStepShared):
     def resample(
         self, particles: List[ParticleTree], normalized_weights: npt.NDArray[np.float_]
     ) -> List[ParticleTree]:
-        """
+        """"
         Use systematic resample for all but the first particle
+
+        self.systematic returns indices of the local_particles. 
 
         Ensure particles are copied only if needed.
         """
         new_indices = self.systematic(normalized_weights) + 1
         seen: List[int] = []
         new_particles: List[ParticleTree] = []
+        print(f"\nResampling of particles: new_indices = {new_indices} \n")
         for idx in new_indices:
             if idx in seen:
                 new_particles.append(particles[idx].copy())
@@ -339,6 +406,8 @@ class PGBART(ArrayStepShared):
                 seen.append(idx)
 
         particles[1:] = new_particles
+
+        print(f"new_particles = {new_particles}")
 
         return particles
 
@@ -369,16 +438,27 @@ class PGBART(ArrayStepShared):
 
     def init_particles(self, tree_id: int, odim: int) -> List[ParticleTree]:
         """Initialize particles."""
+
+        print("Initializing particles")
+        print("-" * 25)
+        print(f"self.all_particles: {len(self.all_particles)}, p0: {self.all_particles[odim][tree_id]}")
+        print(f"self.indices: {self.indices}")
+        print(f"self.a_tree: {self.a_tree}")
+
         p0: ParticleTree = self.all_particles[odim][tree_id]
         # The old tree does not grow so we update the weight only once
-        self.update_weight(p0, odim)
+        self.update_weight(p0, odim, p0=True)
+        
+        print(f"p0.log_weight: {p0.log_weight}")
+
+        # Take p0 and put it in a new list
         particles: List[ParticleTree] = [p0]
 
-        particles.extend(ParticleTree(self.a_tree) for _ in self.indices)
+        particles.extend(ParticleTree(self.a_tree) for _ in self.indices) # self.indices = list(range(1, num_particles))
         return particles
 
     # @line_profile
-    def update_weight(self, particle: ParticleTree, odim: int) -> None:
+    def update_weight(self, particle: ParticleTree, odim: int, p0: bool = False) -> None:
         """
         Update the weight of a particle.
         """
@@ -388,7 +468,11 @@ class PGBART(ArrayStepShared):
             * particle.tree._predict()[None, :, :]
         )
 
+        if p0:
+            print(f"p0 delta: {delta}")
+
         new_likelihood = self.likelihood_logp((self.sum_trees_noi + delta).flatten())
+        print(f"update_weight...new likelihood: {new_likelihood}, \n")
         particle.log_weight = new_likelihood
 
     @staticmethod
@@ -439,6 +523,7 @@ class SampleSplittingVariable:
         This enforce sparsity.
         """
         self.enu = list(enumerate(np.cumsum(alpha_vec / alpha_vec.sum())))
+        print(f"self.enu: {self.enu}")
 
     def rvs(self) -> Union[int, Tuple[int, float]]:
         rnd: float = np.random.random()
@@ -486,6 +571,8 @@ def grow_tree(
     normal,
     shape,
 ):
+    print("\nGrowing tree...")
+    print("-" * 25)
     current_node = tree.get_node(index_leaf_node)
     idx_data_points = current_node.idx_data_points
 
@@ -499,16 +586,25 @@ def grow_tree(
 
     split_value = split_rule.get_split_value(available_splitting_values)
 
+    print(f"split_value: {split_value}, selected_predictor: {selected_predictor}")
+
     if split_value is None:
         return None
+    
+    print(f"available splitting values: {available_splitting_values}")
 
     to_left = split_rule.divide(available_splitting_values, split_value)
+    
+    # Tuple containing idx of data points for new left and right leaf nodes
     new_idx_data_points = idx_data_points[to_left], idx_data_points[~to_left]
+
+    print(f"new_idx_data_points: {new_idx_data_points} \n")
 
     current_node_children = (
         get_idx_left_child(index_leaf_node),
         get_idx_right_child(index_leaf_node),
     )
+
 
     if response == "mix":
         response = "linear" if np.random.random() >= 0.5 else "constant"
@@ -523,6 +619,8 @@ def grow_tree(
             shape=shape,
             response=response,
         )
+
+        print(f"node_idx: {idx}, node_value: {node_value}, linear_params: {linear_params}")
 
         new_node = Node.new_leaf_node(
             value=node_value,
@@ -553,10 +651,15 @@ def draw_leaf_value(
     response: str,
 ) -> Tuple[npt.NDArray[np.float_], Optional[npt.NDArray[np.float_]]]:
     """Draw Gaussian distributed leaf values."""
+    print("\nDrawing leaf value")
+    print("-" * 25)
+
     linear_params = None
     mu_mean = np.empty(shape)
     if y_mu_pred.size == 0:
         return np.zeros(shape), linear_params
+    
+    print(f"m: {m}, norm: {norm}, shape: {shape}, response: {response}")
 
     if y_mu_pred.size == 1:
         mu_mean = np.full(shape, y_mu_pred.item() / m) + norm
@@ -564,6 +667,8 @@ def draw_leaf_value(
         mu_mean = fast_mean(y_mu_pred) / m + norm
     else:
         mu_mean, linear_params = fast_linear_fit(x=x_mu, y=y_mu_pred, m=m, norm=norm)
+    
+    print(f"mu_mean: {mu_mean}, linear_params: {linear_params}")
 
     return mu_mean, linear_params
 

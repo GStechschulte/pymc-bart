@@ -130,6 +130,8 @@ class BART(Distribution):
         separate_trees: Optional[bool] = False,
         **kwargs,
     ):
+        print("--- BART ---")
+
         if response in ["linear", "mix"]:
             warnings.warn(
                 "Options linear and mix are experimental and still not well tested\n"
@@ -141,6 +143,7 @@ class BART(Distribution):
         X, Y = preprocess_xy(X, Y)
 
         split_prior = np.array([]) if split_prior is None else np.asarray(split_prior)
+        print(f"split_prior: {split_prior}")
 
         bart_op = type(
             f"BART_{name}",
