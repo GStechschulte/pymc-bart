@@ -13,6 +13,7 @@
 #   limitations under the License.
 
 from typing import List, Optional, Tuple, Union
+from time import perf_counter
 
 import numpy as np
 import numpy.typing as npt
@@ -128,11 +129,14 @@ class PGBART(ArrayStepShared):
     ):
         model = modelcontext(model)
         initial_values = model.initial_point()
+
+
         if vars is None:
             vars = model.value_vars
         else:
             vars = [model.rvs_to_values.get(var, var) for var in vars]
             vars = inputvars(vars)
+        # print(f"vars: {vars}")
         value_bart = vars[0]
         self.bart = model.values_to_rvs[value_bart].owner.op
 
@@ -218,7 +222,24 @@ class PGBART(ArrayStepShared):
         self.num_particles = num_particles
         self.indices = list(range(1, num_particles))
         shared = make_shared_replacements(initial_values, vars, model)
+
+        # print(f"initial_values: {initial_values}")
+        # print(f"mdoel.datalogp: {[model.datalogp]}")
+        # print(f"model.value_vars: {model.value_vars}")
+        # print(f"vars: {vars}")
+        # print(f"shared: {shared}")
+
         self.likelihood_logp = logp(initial_values, [model.datalogp], vars, shared)
+        # print(f"self.likelihood_logp.get_shared(): {self.likelihood_logp.get_shared()}")
+        # print(f"self.likelihood_logp.input_storage: {self.likelihood_logp.input_storage}")
+        # arrays = [item.storage[0] for item in self.likelihood_logp.input_storage[1:]]
+        # print(self.likelihood_logp.outputs)
+        # print(self.likelihood_logp.output_keys)
+        # print(self.likelihood_logp.output_storage)
+        # print(self.likelihood_logp.n_returned_outputs)
+
+        # print(f"init logp: {self.likelihood_logp(initial_values.get("mu"))}")
+
         self.all_particles = [
             [ParticleTree(self.a_tree) for _ in range(self.m)] for _ in range(self.trees_shape)
         ]
@@ -228,6 +249,7 @@ class PGBART(ArrayStepShared):
         super().__init__(vars, shared)
 
     def astep(self, _):
+        t0 = perf_counter()
         variable_inclusion = np.zeros(self.num_variates, dtype="int")
 
         upper = min(self.lower + self.batch[not self.tune], self.m)
@@ -306,6 +328,10 @@ class PGBART(ArrayStepShared):
 
         if not self.tune:
             self.bart.all_trees.append(self.all_trees)
+
+        t1 = perf_counter()
+
+        # print(f"time: {t1 - t0}")
 
         stats = {"variable_inclusion": variable_inclusion, "tune": self.tune}
         return self.sum_trees, [stats]
@@ -387,7 +413,13 @@ class PGBART(ArrayStepShared):
             * particle.tree._predict()[None, :, :]
         )
 
+        # print(f"delta.shape: {delta.shape}")
+        # print(f"self.sum_trees.shape: {self.sum_trees_noi.shape}")
+        # print(f"eval_value.shape: {((self.sum_trees_noi + delta).flatten()).shape}")
+        # print(f"predictions: {particle.tree._predict()}")
         new_likelihood = self.likelihood_logp((self.sum_trees_noi + delta).flatten())
+        # print(f"new_likelihood: {new_likelihood}")
+
         particle.log_weight = new_likelihood
 
     @staticmethod
@@ -743,4 +775,7 @@ def logp(point, out_vars, vars, shared):  # pylint: disable=redefined-builtin
     out_list, inarray0 = join_nonshared_inputs(point, out_vars, vars, shared)
     function = pytensor_function([inarray0], out_list[0])
     function.trust_input = True
+    # print(f"out_list: {out_list}, inarray0: {inarray0}")
+    # print(f"function: {function}")
+
     return function
