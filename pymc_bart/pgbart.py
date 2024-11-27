@@ -155,8 +155,10 @@ class PGBART(ArrayStepShared):
         self.response = self.bart.response
 
         shape = initial_values[value_bart.name].shape
+        print(f"init shape: {shape}")
 
         self.shape = 1 if len(shape) == 1 else shape[0]
+        print(f"self.shape: {self.shape}")
 
         # Set trees_shape (dim for separate tree structures)
         # and leaves_shape (dim for leaf node values)
@@ -185,6 +187,7 @@ class PGBART(ArrayStepShared):
 
         # if data is binary
         self.leaf_sd = np.ones((self.trees_shape, self.leaves_shape))
+        print(f"self.leaf_sd: {self.leaf_sd}")
 
         y_unique = np.unique(self.Y)
         if y_unique.size == 2 and np.all(y_unique == [0, 1]):
@@ -195,10 +198,13 @@ class PGBART(ArrayStepShared):
         self.running_sd = [
             RunningSd((self.leaves_shape, self.num_observations)) for _ in range(self.trees_shape)
         ]
+        print(f"self.running_sd: {self.running_sd}")
 
         self.sum_trees = np.full(
             (self.trees_shape, self.leaves_shape, self.Y.shape[0]), init_mean
         ).astype(config.floatX)
+        print(f"self.sum_trees: {self.sum_trees}")
+
         self.sum_trees_noi = self.sum_trees - init_mean
         self.a_tree = Tree.new_tree(
             leaf_node_value=init_mean / self.m,
@@ -207,6 +213,7 @@ class PGBART(ArrayStepShared):
             shape=self.leaves_shape,
             split_rules=self.split_rules,
         )
+
 
         self.normal = NormalSampler(1, self.leaves_shape)
         self.uniform = UniformSampler(0, 1)
@@ -240,6 +247,9 @@ class PGBART(ArrayStepShared):
 
         # print(f"init logp: {self.likelihood_logp(initial_values.get("mu"))}")
 
+        print(f"self.trees_shape: {self.trees_shape}")
+        print(f"self.leaves_shape: {self.leaves_shape}")
+
         self.all_particles = [
             [ParticleTree(self.a_tree) for _ in range(self.m)] for _ in range(self.trees_shape)
         ]
@@ -249,6 +259,8 @@ class PGBART(ArrayStepShared):
         super().__init__(vars, shared)
 
     def astep(self, _):
+        print("astep")
+        print("-" * 25)
         t0 = perf_counter()
         variable_inclusion = np.zeros(self.num_variates, dtype="int")
 
@@ -259,10 +271,12 @@ class PGBART(ArrayStepShared):
         for odim in range(self.trees_shape):
             for tree_id in tree_ids:
                 self.iter += 1
+                print(f"\nodim: {odim}, tree_id: {tree_id}, iter: {self.iter}")
                 # Compute the sum of trees without the old tree that we are attempting to replace
                 self.sum_trees_noi[odim] = (
                     self.sum_trees[odim] - self.all_particles[odim][tree_id].tree._predict()
                 )
+                print(f"self.sum_trees: {self.sum_trees}")
                 # Generate an initial set of particles
                 # at the end we return one of these particles as the new tree
                 particles = self.init_particles(tree_id, odim)
@@ -304,6 +318,7 @@ class PGBART(ArrayStepShared):
                 # Update the sum of trees
                 new = new_tree._predict()
                 self.sum_trees[odim] = self.sum_trees_noi[odim] + new
+                print(f"self.sum_trees[odim]: {self.sum_trees[odim]}")
                 # To reduce memory usage, we trim the tree
                 self.all_trees[odim][tree_id] = new_tree.trim()
 
@@ -331,7 +346,7 @@ class PGBART(ArrayStepShared):
 
         t1 = perf_counter()
 
-        # print(f"time: {t1 - t0}")
+        print(f"time: {t1 - t0}")
 
         stats = {"variable_inclusion": variable_inclusion, "tune": self.tune}
         return self.sum_trees, [stats]
@@ -516,6 +531,8 @@ def grow_tree(
     normal,
     shape,
 ):
+    print("grow_tree")
+    print("-" * 25)
     current_node = tree.get_node(index_leaf_node)
     idx_data_points = current_node.idx_data_points
 
@@ -526,7 +543,6 @@ def grow_tree(
     )
 
     split_rule = tree.split_rules[selected_predictor]
-
     split_value = split_rule.get_split_value(available_splitting_values)
 
     if split_value is None:
@@ -542,6 +558,8 @@ def grow_tree(
 
     if response == "mix":
         response = "linear" if np.random.random() >= 0.5 else "constant"
+    
+    print(f"sum_trees: {sum_trees}")
 
     for idx in range(2):
         idx_data_point = new_idx_data_points[idx]
@@ -583,6 +601,12 @@ def draw_leaf_value(
     response: str,
 ) -> Tuple[npt.NDArray[np.float64], Optional[npt.NDArray[np.float64]]]:
     """Draw Gaussian distributed leaf values."""
+    print("\nDraw leaf value")
+    print("-" * 25)
+    print(f"shape: {shape}")
+    print(f"y_mu_pred.size: {y_mu_pred.size}")
+    print(f"y_mu_pred: {y_mu_pred}")
+
     linear_params = None
     mu_mean = np.empty(shape)
     if y_mu_pred.size == 0:
@@ -591,10 +615,12 @@ def draw_leaf_value(
     if y_mu_pred.size == 1:
         mu_mean = np.full(shape, y_mu_pred.item() / m) + norm
     elif y_mu_pred.size < 3 or response == "constant":
+        print(f"norm: {m + norm}")
         mu_mean = fast_mean(y_mu_pred) / m + norm
     else:
         mu_mean, linear_params = fast_linear_fit(x=x_mu, y=y_mu_pred, m=m, norm=norm)
 
+    print(f"mu_mean: {mu_mean}")
     return mu_mean, linear_params
 
 
